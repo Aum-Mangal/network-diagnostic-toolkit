@@ -124,17 +124,36 @@ class ResultProcessor:
         sent = int(ping.get("sent", 4))
 
         if recv == 0:
-            result.problems.append(Problem(
-                severity="critical",
-                module="ping",
-                description="Target is unreachable (100% packet loss)",
-                detail=f"Sent {sent} ICMP echo requests, received 0 replies.",
-                measurement=f"packets_received = 0 / {sent} (loss: 100%)",
-                threshold="packets_received > 0",
-                rule="IF packets_received == 0 THEN Target Unreachable",
-                explanation="The destination host did not respond to ICMP Echo Requests. It may be offline, the route may be down, or a firewall is silently dropping ICMP."
-            ))
-            score = 0
+            if ping.get("icmp_blocked"):
+                tcp_info = ping.get("tcp_fallback") or {}
+                p_num = tcp_info.get("port", 443)
+                rtt = float(tcp_info.get("rtt_ms", avg))
+                result.problems.append(Problem(
+                    severity="info",
+                    module="ping",
+                    description=f"ICMP Echo filtered by edge firewall; Host ALIVE via TCP port {p_num}",
+                    detail=f"Target dropped ICMP Echo Requests (security policy), but TCP 3-way handshake connected in {rtt:.1f} ms.",
+                    measurement=f"ICMP packets = 0/{sent}, TCP SYN RTT = {rtt:.1f} ms",
+                    threshold=f"TCP port {p_num} == CONNECTED",
+                    rule="IF icmp_dropped AND tcp_connected THEN Firewall ICMP Filtering",
+                    explanation="Enterprise cloud platforms (Amazon, Microsoft, Cloudflare) filter ICMP Echo Requests (RFC 792) to mitigate Ping-Flood / DoS attacks. The service is active over standard TCP transport."
+                ))
+                if rtt > LATENCY_WARN:
+                    score -= 12
+                elif rtt > LATENCY_GOOD:
+                    score -= 6
+            else:
+                result.problems.append(Problem(
+                    severity="critical",
+                    module="ping",
+                    description="Target is unreachable (100% packet loss)",
+                    detail=f"Sent {sent} ICMP echo requests, received 0 replies.",
+                    measurement=f"packets_received = 0 / {sent} (loss: 100%)",
+                    threshold="packets_received > 0",
+                    rule="IF packets_received == 0 THEN Target Unreachable",
+                    explanation="The destination host did not respond to ICMP Echo Requests or TCP SYN handshakes. It may be offline or route is down."
+                ))
+                score = 0
         else:
             # Packet loss evaluation
             if loss >= LOSS_CRITICAL:
@@ -442,11 +461,18 @@ class ResultProcessor:
         recs = []
         root_cause_parts = []
 
-        # 1. Unreachable destination
+        # 1. Unreachable destination or ICMP filtered
         if ping and ping.get("received", 0) == 0:
-            causes.append("Host is powered off, offline, or ICMP echo requests are blocked by a firewall.")
-            recs.append("Verify destination IP is correct and test service ports (HTTP/HTTPS) using TCP port scan.")
-            root_cause_parts.append("Complete ICMP packet drop to destination host.")
+            if ping.get("icmp_blocked"):
+                rtt = ping.get("avg_latency", 0)
+                p_num = (ping.get("tcp_fallback") or {}).get("port", 443)
+                root_cause_parts.append(
+                    f"Host edge firewall filters ICMP Echo; confirmed ALIVE via TCP port {p_num} ({rtt:.1f}ms RTT)."
+                )
+            else:
+                causes.append("Host is powered off, offline, or ICMP echo requests are blocked by a firewall.")
+                recs.append("Verify destination IP is correct and test service ports (HTTP/HTTPS) using TCP port scan.")
+                root_cause_parts.append("Complete packet drop to destination host.")
 
         # 2. Packet loss
         elif ping and ping.get("packet_loss", 0) > 0:

@@ -16,28 +16,30 @@ from typing import Any, Dict, List, Optional
 
 def run_network_info() -> Dict[str, Any]:
     """
-    Gather local network configuration.
-
-    Returns:
-    {
-        "hostname":        str,
-        "local_ip":        str,
-        "subnet_mask":     str | None,
-        "default_gateway": str | None,
-        "dns_servers":     list[str],
-    }
+    Gather local network configuration including local gateway latency.
     """
     hostname = socket.gethostname()
     local_ip = _get_local_ip()
     subnet_mask, gateway = _get_subnet_gateway()
     dns_servers = _get_dns_servers()
 
+    gateway_rtt: Optional[float] = None
+    if gateway:
+        try:
+            from modules.ping import run_ping
+            gw_res = run_ping(gateway, count=2, timeout=1)
+            if gw_res.get("received", 0) > 0:
+                gateway_rtt = float(gw_res.get("avg_latency", 0.0))
+        except Exception:
+            pass
+
     return {
-        "hostname":        hostname,
-        "local_ip":        local_ip,
-        "subnet_mask":     subnet_mask,
-        "default_gateway": gateway,
-        "dns_servers":     dns_servers,
+        "hostname":           hostname,
+        "local_ip":           local_ip,
+        "subnet_mask":        subnet_mask,
+        "default_gateway":    gateway,
+        "gateway_latency_ms": gateway_rtt,
+        "dns_servers":        dns_servers,
     }
 
 

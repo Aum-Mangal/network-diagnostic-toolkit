@@ -1,6 +1,11 @@
 """
 app.py — Network Diagnostic Toolkit | Browser GUI
-Minimalist, high-density, professional UI adhering to modern design taste.
+Advanced Computer Networks Diagnostic Suite:
+- OSI 4-Layer Protocol Health Matrix
+- LAN vs. WAN Comparative Benchmark (Wi-Fi/Gateway vs. Remote Target)
+- Interactive Hop-by-Hop Visual Network Route (Topology Path)
+- TCP SYN Fallback for ICMP-filtered enterprise hosts (Amazon, Microsoft, Cloudflare)
+- RFC 1812 Router Rate-Limiting Detection
 """
 
 import json
@@ -17,10 +22,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── MINIMAL CSS ───────────────────────────────────────────────────────────────
+# ── PROFESSIONAL MINIMAL CSS ──────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -33,7 +38,6 @@ st.markdown("""
     
     #MainMenu, header, footer { visibility: hidden; }
     
-    /* Clean button design */
     .stButton > button {
         border-radius: 6px;
         font-weight: 500;
@@ -87,8 +91,8 @@ st.markdown("""
     
     .card-banner {
         border-radius: 6px;
-        padding: 14px 16px;
-        margin-bottom: 20px;
+        padding: 12px 16px;
+        margin-bottom: 16px;
         border: 1px solid #E5E7EB;
         background: #F9FAFB;
     }
@@ -105,6 +109,36 @@ st.markdown("""
     .badge-critical { background: #FEE2E2; color: #991B1B; }
     .badge-warning { background: #FEF3C7; color: #92400E; }
     .badge-info { background: #E0E7FF; color: #3730A3; }
+
+    /* Visual Hop Route Map */
+    .hop-node {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        border-left: 2px solid #E5E7EB;
+        margin-left: 14px;
+        position: relative;
+    }
+    .hop-node::before {
+        content: "";
+        position: absolute;
+        left: -6px;
+        top: 14px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #111827;
+    }
+    .hop-node.rate-limited::before {
+        background: #9CA3AF;
+    }
+    .hop-node.spike::before {
+        background: #F59E0B;
+    }
+    .hop-node.destination::before {
+        background: #10B981;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -112,7 +146,7 @@ st.markdown("""
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def status_indicator(status: str) -> str:
     s = (status or "").upper()
-    if s in ("HEALTHY", "SUCCESS", "OPEN", "OK"):
+    if s in ("HEALTHY", "SUCCESS", "OPEN", "OK", "ICMP_BLOCKED_TCP_OK"):
         return '<span class="dot dot-healthy"></span><span class="status-text" style="color:#047857;">HEALTHY</span>'
     if s in ("DEGRADED", "WARNING"):
         return '<span class="dot dot-warning"></span><span class="status-text" style="color:#B45309;">WARNING</span>'
@@ -132,13 +166,13 @@ def render_kv(key: str, val: str):
 
 # ── HEADER ────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="padding-top: 0.5rem; padding-bottom: 1.5rem;">
+<div style="padding-top: 0.5rem; padding-bottom: 1.2rem;">
     <div style="display: flex; align-items: center; gap: 8px;">
         <span style="font-size: 20px;">⚡</span>
         <h1 style="font-size: 22px; font-weight: 700; margin: 0; color: #111827; letter-spacing: -0.02em;">Network Diagnostic Toolkit</h1>
     </div>
     <p style="font-size: 13px; color: #6B7280; margin-top: 4px; margin-bottom: 0;">
-        Intelligent latency, routing, and DNS root-cause analysis.
+        Full-stack OSI layer diagnostics, root-cause synthesis, and hop-by-hop route visualization.
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -159,25 +193,27 @@ with st.container(border=True):
         query = st.text_input(
             "Target or Query",
             value=st.session_state.query_input,
-            placeholder="google.com, 1.1.1.1, or 'Why is google.com slow?'",
+            placeholder="google.com, amazon.com, 1.1.1.1, or 'Why is github.com slow?'",
             label_visibility="collapsed"
         )
     with col2:
         run = st.button("Run Check", type="primary", use_container_width=True)
 
-with st.expander("Diagnostic Settings", expanded=False):
+with st.expander("Diagnostic Configuration", expanded=False):
     c1, c2, c3 = st.columns(3)
     ping_count = c1.number_input("Ping Packets", min_value=1, max_value=20, value=4)
     ports_raw = c2.text_input("Port List", "22, 53, 80, 443, 8080")
     intent_opt = c3.selectbox("Intent Override", ["Auto", "slow", "full", "connectivity", "performance", "dns", "route", "access"])
 
-# Quick target suggestions
-st.markdown("<div style='font-size: 12px; color: #9CA3AF; margin-top: -8px; margin-bottom: 16px;'>Try: "
-            "<a href='#' style='color:#4B5563; text-decoration:none; margin-right:10px;'>google.com</a>"
-            "<a href='#' style='color:#4B5563; text-decoration:none; margin-right:10px;'>Why is google.com slow?</a>"
-            "<a href='#' style='color:#4B5563; text-decoration:none; margin-right:10px;'>1.1.1.1</a>"
-            "<a href='#' style='color:#4B5563; text-decoration:none;'>check port 443 on github.com</a>"
-            "</div>", unsafe_allow_html=True)
+# Quick target suggestion pills
+st.markdown("""
+<div style='font-size: 12px; color: #9CA3AF; margin-top: -6px; margin-bottom: 18px;'>
+    <span style="color:#6B7280; font-weight:500;">Quick Test:</span>
+    <span style="color:#111827; margin-left:6px; font-family:'JetBrains Mono',monospace;">google.com</span> (Standard ICMP) &nbsp;|&nbsp;
+    <span style="color:#111827; font-family:'JetBrains Mono',monospace;">amazon.com</span> (ICMP Filtered + TCP) &nbsp;|&nbsp;
+    <span style="color:#111827; font-family:'JetBrains Mono',monospace;">1.1.1.1</span> (Cloudflare Anycast)
+</div>
+""", unsafe_allow_html=True)
 
 
 # ── EXECUTION & DIAGNOSTICS ───────────────────────────────────────────────────
@@ -185,7 +221,7 @@ if run and query.strip():
     from analysis.diagnosis import parse_query
     parsed = parse_query(query.strip())
 
-    # ── Handle Missing Target Gracefully ──────────────────────────────────────
+    # Handle Missing Target Gracefully
     if parsed.needs_target or not parsed.target:
         st.markdown(f"""
         <div class="card-banner" style="border-left: 3px solid #F59E0B;">
@@ -199,14 +235,14 @@ if run and query.strip():
         if qcol1.button("google.com", use_container_width=True):
             set_target(f"{query.strip()} google.com")
             st.rerun()
-        if qcol2.button("1.1.1.1 (Cloudflare)", use_container_width=True):
+        if qcol2.button("amazon.com", use_container_width=True):
+            set_target(f"{query.strip()} amazon.com")
+            st.rerun()
+        if qcol3.button("1.1.1.1", use_container_width=True):
             set_target(f"{query.strip()} 1.1.1.1")
             st.rerun()
-        if qcol3.button("github.com", use_container_width=True):
+        if qcol4.button("github.com", use_container_width=True):
             set_target(f"{query.strip()} github.com")
-            st.rerun()
-        if qcol4.button("8.8.8.8 (Google DNS)", use_container_width=True):
-            set_target(f"{query.strip()} 8.8.8.8")
             st.rerun()
         st.stop()
 
@@ -222,7 +258,6 @@ if run and query.strip():
         except Exception:
             ports = [22, 53, 80, 443, 8080]
 
-    # Progress bar and status
     prog_bar = st.progress(0)
     status_txt = st.empty()
 
@@ -263,46 +298,113 @@ if run and query.strip():
         st.markdown(f"""
         <div class="card-banner" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
             <div>
-                <span style="font-size:12px; color:#6B7280; font-weight:500;">QUERY</span>
+                <span style="font-size:11px; color:#6B7280; font-weight:600; text-transform:uppercase;">NATURAL QUERY</span>
                 <div style="font-size:13px; font-weight:600; color:#111827;">"{query}"</div>
             </div>
             <div style="font-size:12px;">
                 <span style="color:#6B7280;">Target:</span> <strong style="font-family:'JetBrains Mono',monospace;">{target}</strong> &nbsp;|&nbsp;
                 <span style="color:#6B7280;">Intent:</span> <strong style="font-family:'JetBrains Mono',monospace;">{intent}</strong> &nbsp;|&nbsp;
-                <span style="color:#6B7280;">Modules:</span> <span style="color:#4B5563;">{', '.join(sched)}</span>
+                <span style="color:#6B7280;">Pipeline:</span> <span style="color:#4B5563;">{', '.join(sched)}</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ── METRIC TILES ──────────────────────────────────────────────────────────
+    # ── EXECUTIVE SUMMARY & SCORE ─────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Resolved Target", p.resolved_ip or target)
+    m1.metric("Destination IP", p.resolved_ip or target)
     m2.metric("Health Score", f"{processed.health_score} / 100")
-    m3.metric("Overall Status", processed.overall_status)
+    m3.metric("Network Status", processed.overall_status)
     ping_res = p.results.get("ping", {})
     avg_lat = ping_res.get("avg_latency")
-    m4.metric("Average RTT", f"{avg_lat:.1f} ms" if avg_lat is not None else "—")
+    m4.metric("Avg Latency (RTT)", f"{avg_lat:.1f} ms" if avg_lat is not None else "—")
 
-    st.markdown("<hr style='margin: 18px 0; border: none; border-top: 1px solid #E5E7EB;'>", unsafe_allow_html=True)
-
-    # ── SYNTHESIZED ROOT-CAUSE DIAGNOSIS ──────────────────────────────────────
+    # Synthesized Root-Cause Callout
     if processed.joint_root_cause:
         status_bg = "#ECFDF5" if processed.overall_status == "HEALTHY" else ("#FFFBEB" if processed.overall_status == "WARNING" else "#FEF2F2")
         status_border = "#10B981" if processed.overall_status == "HEALTHY" else ("#F59E0B" if processed.overall_status == "WARNING" else "#EF4444")
         st.markdown(f"""
-        <div style="background:{status_bg}; border-left: 4px solid {status_border}; padding: 14px 16px; border-radius: 4px; margin-bottom: 20px;">
+        <div style="background:{status_bg}; border-left: 4px solid {status_border}; padding: 14px 16px; border-radius: 4px; margin-top: 14px; margin-bottom: 20px;">
             <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #4B5563; letter-spacing: 0.05em; margin-bottom: 4px;">
-                Synthesized Root-Cause Analysis
+                Synthesized Root-Cause Verdict
             </div>
-            <div style="font-size: 14px; font-weight: 600; color: #111827;">
+            <div style="font-size: 13.5px; font-weight: 600; color: #111827; line-height: 1.5;">
                 {processed.joint_root_cause}
             </div>
         </div>
         """, unsafe_allow_html=True)
 
+    # ── LAN VS WAN BENCHMARK ──────────────────────────────────────────────────
+    # Isolates local Wi-Fi / Router issues from Internet WAN delays
+    net_info = p.results.get("network_info")
+    gw_latency = net_info.get("gateway_latency_ms") if net_info else None
+    gw_ip = net_info.get("default_gateway") if net_info else None
+
+    if gw_latency is not None and avg_lat is not None:
+        with st.container(border=True):
+            st.markdown("<strong style='font-size:13.5px;'>Local LAN vs. Remote WAN Benchmark</strong>", unsafe_allow_html=True)
+            st.markdown("<p style='font-size:12px; color:#6B7280; margin-bottom:12px;'>Isolates whether network delay originates inside your home/Wi-Fi or on the Internet.</p>", unsafe_allow_html=True)
+            
+            b1, b2 = st.columns(2)
+            with b1:
+                st.markdown(f"""
+                <div style="padding:10px 14px; border-radius:6px; background:#F9FAFB; border:1px solid #E5E7EB;">
+                    <div style="font-size:11px; color:#6B7280; text-transform:uppercase; font-weight:600;">1. Local Wi-Fi / Router (LAN)</div>
+                    <div style="font-size:20px; font-weight:700; color:#111827; margin:4px 0;">{gw_latency:.1f} ms</div>
+                    <div style="font-size:12px; color:#047857;">● Gateway: {gw_ip or 'Local Router'}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with b2:
+                st.markdown(f"""
+                <div style="padding:10px 14px; border-radius:6px; background:#F9FAFB; border:1px solid #E5E7EB;">
+                    <div style="font-size:11px; color:#6B7280; text-transform:uppercase; font-weight:600;">2. Destination Cloud (WAN)</div>
+                    <div style="font-size:20px; font-weight:700; color:#111827; margin:4px 0;">{avg_lat:.1f} ms</div>
+                    <div style="font-size:12px; color:#4B5563;">● Target: {target}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # Plain-language explanation
+            if gw_latency <= 5.0:
+                st.markdown(f"<div style='font-size:12px; color:#047857; margin-top:8px;'>✓ <strong>Local Wi-Fi is optimal ({gw_latency:.1f}ms).</strong> Any observed latency is introduced upstream in your ISP or the destination network.</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='font-size:12px; color:#B45309; margin-top:8px;'>⚠️ <strong>Local Wi-Fi / Router latency is elevated ({gw_latency:.1f}ms).</strong> Wi-Fi congestion or router bufferbloat is contributing to delays.</div>", unsafe_allow_html=True)
+
+    # ── OSI 4-LAYER PROTOCOL HEALTH MATRIX ────────────────────────────────────
+    st.markdown("<h3 style='font-size:14px; font-weight:600; margin-top:20px; margin-bottom:10px;'>OSI 4-Layer Protocol Health Matrix</h3>", unsafe_allow_html=True)
+    
+    dns_res = p.results.get("dns", {})
+    port_res = p.results.get("port", {})
+    
+    osi_data = [
+        {
+            "OSI Layer": "Layer 7 — Application",
+            "Protocol": "DNS (Domain Name Resolution)",
+            "Status": "HEALTHY" if dns_res.get("success") else ("SKIPPED" if "dns" not in p.results else "FAILED"),
+            "Key Measurement": f"{dns_res.get('response_time_ms', 0):.1f} ms lookup time ({len(dns_res.get('ipv4_addresses', []))} A records)" if dns_res.get("success") else ("Not evaluated" if "dns" not in p.results else dns_res.get("error", "Failed")),
+        },
+        {
+            "OSI Layer": "Layer 4 — Transport",
+            "Protocol": "TCP (SYN Handshake & Ports)",
+            "Status": "HEALTHY" if (port_res.get("open_count", 0) > 0 or ping_res.get("tcp_fallback")) else ("SKIPPED" if "port" not in p.results else "WARNING"),
+            "Key Measurement": f"{port_res.get('open_count', 0)} open service ports" if port_res else (f"TCP SYN RTT {ping_res['tcp_fallback']['rtt_ms']:.1f}ms" if ping_res.get("tcp_fallback") else "Transport healthy"),
+        },
+        {
+            "OSI Layer": "Layer 3 — Network",
+            "Protocol": "ICMP & IP Routing (TTL)",
+            "Status": "HEALTHY" if ping_res.get("status") in ("HEALTHY", "ICMP_BLOCKED_TCP_OK") else ping_res.get("status", "SKIPPED"),
+            "Key Measurement": f"ICMP Filtered (Host alive via TCP)" if ping_res.get("icmp_blocked") else f"{ping_res.get('avg_latency', 0):.1f}ms RTT ({ping_res.get('packet_loss', 0):.1f}% loss)",
+        },
+        {
+            "OSI Layer": "Layer 2 / 1 — Data Link & LAN",
+            "Protocol": "Ethernet / 802.11 Wi-Fi",
+            "Status": "HEALTHY" if net_info and net_info.get("default_gateway") else "UNKNOWN",
+            "Key Measurement": f"Gateway {net_info.get('default_gateway', 'None')} (Subnet: {net_info.get('subnet_mask', '-')})" if net_info else "Local interface active",
+        }
+    ]
+    st.dataframe(pd.DataFrame(osi_data), hide_index=True, use_container_width=True)
+
     # ── DETECTED ISSUES & EXPLANATIONS ────────────────────────────────────────
     if processed.problems:
-        st.markdown("<h3 style='font-size:14px; font-weight:600; margin-bottom:12px;'>Diagnostic Findings & Explanations</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='font-size:14px; font-weight:600; margin-top:20px; margin-bottom:12px;'>Diagnostic Findings & Explanations</h3>", unsafe_allow_html=True)
         for prob in processed.problems:
             sev_class = f"badge-{prob.severity.lower()}"
             st.markdown(f"""
@@ -316,27 +418,81 @@ if run and query.strip():
                     <span><strong>Measured:</strong> {prob.measurement or 'N/A'}</span>
                     <span><strong>Threshold:</strong> {prob.threshold or 'N/A'}</span>
                 </div>
-                {f'<div style="font-size:12px; color:#6B7280; margin-top:6px; font-style:italic;">{prob.explanation}</div>' if prob.explanation else ''}
+                {f'<div style="font-size:12px; color:#4B5563; margin-top:6px; font-style:italic;">{prob.explanation}</div>' if prob.explanation else ''}
             </div>
             """, unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── MODULE DETAILS ────────────────────────────────────────────────────────
-    # 1. Connectivity (Ping)
-    ping = p.results.get("ping")
-    if ping:
+    # ── VISUAL NETWORK ROUTE TOPOLOGY MAP (Phase 5) ───────────────────────────
+    tr = p.results.get("traceroute")
+    if tr:
         with st.container(border=True):
-            st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:14px;'><strong style='font-size:14px;'>Connectivity (ICMP Ping)</strong> {status_indicator(ping.get('status'))}</div>", unsafe_allow_html=True)
-            pc1, pc2 = st.columns([1, 2])
-            with pc1:
-                st.markdown(render_kv("Sent", ping.get('sent', 0)), unsafe_allow_html=True)
-                st.markdown(render_kv("Received", ping.get('received', 0)), unsafe_allow_html=True)
-                st.markdown(render_kv("Packet Loss", f"{ping.get('packet_loss', 0):.1f}%"), unsafe_allow_html=True)
-                st.markdown(render_kv("Avg Latency", f"{ping.get('avg_latency', 0):.1f} ms"), unsafe_allow_html=True)
-                st.markdown(render_kv("Min / Max", f"{ping.get('min_latency', 0):.1f} / {ping.get('max_latency', 0):.1f} ms"), unsafe_allow_html=True)
-            with pc2:
+            status = "SUCCESS" if tr.get("reached") else "WARNING"
+            st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:14px;'><strong style='font-size:14px;'>Hop-by-Hop Visual Network Route</strong> {status_indicator(status)}</div>", unsafe_allow_html=True)
+            hops = tr.get("hops", [])
+            
+            if hops:
+                st.markdown("<div style='font-size:12px; color:#6B7280; margin-bottom:14px;'>Interactive path tracing TTL increments from your device to the destination server:</div>", unsafe_allow_html=True)
+                
+                # Starting Node: User's PC
+                st.markdown("""
+                <div class="hop-node">
+                    <div style="font-weight:600; font-size:13px; color:#111827;">Your PC</div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#6B7280;">Local Client</div>
+                    <span style="margin-left:auto; font-size:11px; color:#047857; font-weight:600;">0.0 ms</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                for h in hops:
+                    h_num = h["hop"]
+                    ip = h.get("ip")
+                    hn = h.get("hostname")
+                    lat = h.get("latency_ms")
+
+                    is_rate_limited = lat is None or ip is None
+                    is_destination = h_num == len(hops) and tr.get("reached")
+                    node_class = "destination" if is_destination else ("rate-limited" if is_rate_limited else "")
+
+                    ip_display = ip or "* * * (ICMP Rate Limited)"
+                    hn_display = f" — {hn[:35]}" if hn and hn != ip else ""
+                    
+                    if is_rate_limited:
+                        lat_display = '<span style="color:#9CA3AF; font-size:11px;">* (RFC 1812)</span>'
+                    elif lat < 30:
+                        lat_display = f'<span style="color:#047857; font-weight:600; font-size:11.5px;">{lat:.1f} ms</span>'
+                    elif lat < 100:
+                        lat_display = f'<span style="color:#B45309; font-weight:600; font-size:11.5px;">{lat:.1f} ms</span>'
+                    else:
+                        lat_display = f'<span style="color:#B91C1C; font-weight:600; font-size:11.5px;">{lat:.1f} ms (Spike)</span>'
+
+                    st.markdown(f"""
+                    <div class="hop-node {node_class}">
+                        <div style="font-size:12.5px; color:#111827; font-weight:500;">Hop {h_num}</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#4B5563;">{ip_display}{hn_display}</div>
+                        <span style="margin-left:auto; font-family:'JetBrains Mono',monospace;">{lat_display}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='font-size:13px; color:#6B7280;'>No hops recorded (ICMP likely filtered).</span>", unsafe_allow_html=True)
+
+    # ── PROTOCOL DETAILS (PING, DNS, PORTS) ───────────────────────────────────
+    col_p, col_d = st.columns(2)
+    
+    with col_p:
+        ping = p.results.get("ping")
+        if ping:
+            with st.container(border=True):
+                st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:12px;'><strong style='font-size:14px;'>Connectivity (ICMP & TCP)</strong> {status_indicator(ping.get('status'))}</div>", unsafe_allow_html=True)
+                st.markdown(render_kv("Packets Sent/Recv", f"{ping.get('sent',0)} / {ping.get('received',0)}"), unsafe_allow_html=True)
+                st.markdown(render_kv("Packet Loss", f"{ping.get('packet_loss',0):.1f}%"), unsafe_allow_html=True)
+                st.markdown(render_kv("Avg RTT", f"{ping.get('avg_latency',0):.1f} ms"), unsafe_allow_html=True)
+                st.markdown(render_kv("Jitter (Delay Var.)", f"{ping.get('jitter_ms',0):.1f} ms"), unsafe_allow_html=True)
+
+                if ping.get("icmp_blocked"):
+                    tcp_f = ping.get("tcp_fallback", {})
+                    st.markdown(f"<div style='background:#F0FDF4; border:1px solid #DCFCE7; padding:8px 10px; border-radius:4px; font-size:11.5px; color:#166534; margin-top:8px;'>✓ ICMP Echo blocked; Verified alive via TCP port {tcp_f.get('port', 443)} ({tcp_f.get('rtt_ms', 0):.1f}ms).</div>", unsafe_allow_html=True)
+
                 raw = ping.get("raw_times", [])
-                if raw:
+                if raw and len(raw) > 1:
                     fig = go.Figure(go.Scatter(
                         y=raw, mode="lines+markers",
                         line=dict(color="#111827", width=1.5),
@@ -344,96 +500,37 @@ if run and query.strip():
                     ))
                     fig.update_layout(
                         margin=dict(l=0, r=0, t=10, b=0),
-                        height=130,
+                        height=100,
                         paper_bgcolor="rgba(0,0,0,0)",
                         plot_bgcolor="rgba(0,0,0,0)",
                         xaxis=dict(visible=False),
                         yaxis=dict(
                             gridcolor="#F3F4F6",
-                            title=dict(text="RTT (ms)", font=dict(size=11, color="#9CA3AF")),
-                            tickfont=dict(size=10, color="#9CA3AF")
+                            title=dict(text="RTT (ms)", font=dict(size=10, color="#9CA3AF")),
+                            tickfont=dict(size=9, color="#9CA3AF")
                         )
                     )
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-    # 2. Routing (Traceroute)
-    tr = p.results.get("traceroute")
-    if tr:
-        with st.container(border=True):
-            status = "SUCCESS" if tr.get("reached") else "WARNING"
-            st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:14px;'><strong style='font-size:14px;'>Routing Path (Traceroute)</strong> {status_indicator(status)}</div>", unsafe_allow_html=True)
-            hops = tr.get("hops", [])
-            if hops:
-                df = pd.DataFrame([{
-                    "Hop": h["hop"],
-                    "Router IP": h.get("ip") or "* * * (ICMP Rate Limited)",
-                    "Hostname": h.get("hostname") or "-",
-                    "RTT (ms)": h.get("latency_ms"),
-                } for h in hops])
-                st.dataframe(
-                    df,
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Hop": st.column_config.NumberColumn(width="small"),
-                        "RTT (ms)": st.column_config.NumberColumn(format="%.1f")
-                    }
-                )
-            else:
-                st.markdown("<span style='font-size:13px; color:#6B7280;'>No hops recorded (ICMP likely filtered).</span>", unsafe_allow_html=True)
-
-    # 3. DNS & Ports
-    dns = p.results.get("dns")
-    port_d = p.results.get("port")
-    if dns or port_d:
-        colA, colB = st.columns(2)
-        with colA:
-            if dns:
-                with st.container(border=True):
-                    status = "SUCCESS" if dns.get("success") else "FAILED"
-                    st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:14px;'><strong style='font-size:14px;'>DNS Resolution</strong> {status_indicator(status)}</div>", unsafe_allow_html=True)
-                    st.markdown(render_kv("Domain", dns.get("domain", "")), unsafe_allow_html=True)
-                    st.markdown(render_kv("Lookup Time", f"{dns.get('response_time_ms', 0):.1f} ms"), unsafe_allow_html=True)
-                    ips = dns.get("ipv4_addresses", [])
-                    if ips:
-                        st.markdown("<div style='font-size:12px; color:#6B7280; margin-top:8px;'>IPv4 Records:</div>", unsafe_allow_html=True)
-                        for ip in ips:
-                            st.markdown(f"<div style='font-family:\"JetBrains Mono\",monospace; font-size:12px; color:#111827;'>• {ip}</div>", unsafe_allow_html=True)
-        with colB:
-            if port_d:
-                with st.container(border=True):
-                    st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:14px;'><strong style='font-size:14px;'>Port Accessibility</strong> <span style='font-size:12px; color:#6B7280;'>{port_d.get('open_count', 0)} open</span></div>", unsafe_allow_html=True)
-                    ports_map = port_d.get("ports", {})
-                    for p_num in sorted(ports_map.keys(), key=int):
-                        info = ports_map[p_num]
-                        is_open = info["status"] == "OPEN"
-                        c_dot = "#10B981" if is_open else "#EF4444"
-                        st.markdown(f"""
-                        <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #F3F4F6;">
-                            <span style="font-family:'JetBrains Mono',monospace; font-size:12px;"><span style="color:{c_dot}; margin-right:6px;">●</span>{p_num}</span>
-                            <span style="font-size:12px; color:#6B7280;">{info['service']} ({info['status']})</span>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-    # 4. Local Network Context
-    net = p.results.get("network_info")
-    if net:
-        with st.expander("Local Network & Host Configuration"):
-            n1, n2 = st.columns(2)
-            with n1:
-                st.markdown(render_kv("Hostname", net.get("hostname", "-")), unsafe_allow_html=True)
-                st.markdown(render_kv("Local IP", net.get("local_ip", "-")), unsafe_allow_html=True)
-                st.markdown(render_kv("Subnet Mask", net.get("subnet_mask", "-")), unsafe_allow_html=True)
-            with n2:
-                st.markdown(render_kv("Default Gateway", net.get("default_gateway", "-")), unsafe_allow_html=True)
-                st.markdown(render_kv("DNS Servers", ", ".join(net.get("dns_servers", []) or ["-"])), unsafe_allow_html=True)
+    with col_d:
+        dns = p.results.get("dns")
+        if dns:
+            with st.container(border=True):
+                st.markdown(f"<div style='display:flex; justify-content:space-between; margin-bottom:12px;'><strong style='font-size:14px;'>DNS Resolution (L7)</strong> {status_indicator('SUCCESS' if dns.get('success') else 'FAILED')}</div>", unsafe_allow_html=True)
+                st.markdown(render_kv("Domain", dns.get("domain", "")), unsafe_allow_html=True)
+                st.markdown(render_kv("Lookup Latency", f"{dns.get('response_time_ms', 0):.1f} ms"), unsafe_allow_html=True)
+                ips = dns.get("ipv4_addresses", [])
+                if ips:
+                    st.markdown("<div style='font-size:12px; color:#6B7280; margin-top:8px;'>A (IPv4) Records:</div>", unsafe_allow_html=True)
+                    for ip in ips[:3]:
+                        st.markdown(f"<div style='font-family:\"JetBrains Mono\",monospace; font-size:11.5px; color:#111827;'>• {ip}</div>", unsafe_allow_html=True)
 
     # ── ACTIONABLE RECOMMENDATIONS ────────────────────────────────────────────
     if processed.recommendations:
         with st.container(border=True):
-            st.markdown("<strong style='font-size:14px;'>Recommended Actions</strong>", unsafe_allow_html=True)
+            st.markdown("<strong style='font-size:13.5px;'>Recommended Technical Actions</strong>", unsafe_allow_html=True)
             for rec in processed.recommendations:
-                st.markdown(f"<div style='font-size:13px; color:#374151; margin-top:6px;'>→ {rec}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:13px; color:#374151; margin-top:5px;'>→ {rec}</div>", unsafe_allow_html=True)
 
     # ── EXPORT OPTIONS ────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -444,7 +541,7 @@ if run and query.strip():
         t2.download_button("Download Data (.json)", generate_json_report(processed), file_name=f"data_{target}.json", use_container_width=True)
         st.json(p.results)
 
-    st.markdown(f"<div style='text-align:right; font-size:11px; color:#9CA3AF; margin-top:16px;'>Diagnostic Suite executed in {p.total_time_ms:.0f} ms</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:right; font-size:11px; color:#9CA3AF; margin-top:14px;'>Diagnostic Suite executed in {p.total_time_ms:.0f} ms</div>", unsafe_allow_html=True)
 
 elif run:
     st.info("Please enter a valid target or query to begin.")

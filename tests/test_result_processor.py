@@ -121,3 +121,34 @@ def test_result_processor_honest_error_scoring():
     # Since 2 out of 4 modules failed, the score cannot be 100
     assert result.health_score < 70
     assert any("failed to execute" in p.description for p in result.problems)
+
+
+def test_result_processor_icmp_blocked_tcp_alive():
+    """Verify that when ICMP is blocked by firewall but TCP 443 connects, health score stays high."""
+    payload = DiagnosticPayload(
+        target="amazon.com",
+        resolved_ip="205.251.242.103",
+        intent="connectivity",
+        intended_modules=["ping"],
+        modules_run=["ping"],
+        results={
+            "ping": {
+                "sent": 4,
+                "received": 0,
+                "lost": 4,
+                "packet_loss": 100.0,
+                "avg_latency": 28.5,
+                "min_latency": 28.5,
+                "max_latency": 28.5,
+                "status": "ICMP_BLOCKED_TCP_OK",
+                "icmp_blocked": True,
+                "tcp_fallback": {"port": 443, "rtt_ms": 28.5},
+            }
+        }
+    )
+    processor = ResultProcessor()
+    result = processor.process(payload)
+
+    assert result.health_score >= 80
+    assert result.overall_status == "HEALTHY"
+    assert any("Host ALIVE via TCP port 443" in p.description for p in result.problems)
