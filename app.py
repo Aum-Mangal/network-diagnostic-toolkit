@@ -348,7 +348,11 @@ if run and query.strip():
                         paper_bgcolor="rgba(0,0,0,0)",
                         plot_bgcolor="rgba(0,0,0,0)",
                         xaxis=dict(visible=False),
-                        yaxis=dict(gridcolor="#F3F4F6", title="RTT (ms)", titlefont=dict(size=11, color="#9CA3AF"), tickfont=dict(size=10, color="#9CA3AF"))
+                        yaxis=dict(
+                            gridcolor="#F3F4F6",
+                            title=dict(text="RTT (ms)", font=dict(size=11, color="#9CA3AF")),
+                            tickfont=dict(size=10, color="#9CA3AF")
+                        )
                     )
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
