@@ -15,10 +15,11 @@ from core.validator import ValidationResult
 
 
 # ── Intent → Module mapping (Phase 13) ─────────────────────────────────────
+# "slow" intentionally includes DNS -> Ping -> Traceroute -> latency/loss analysis
 INTENT_MODULE_MAP: Dict[str, List[str]] = {
     "connectivity": ["dns", "ping"],
-    "performance":  ["ping", "traceroute"],
-    "slow":         ["ping", "traceroute"],
+    "performance":  ["dns", "ping", "traceroute"],
+    "slow":         ["dns", "ping", "traceroute"],
     "access":       ["dns", "ping", "traceroute", "port"],
     "https":        ["dns", "port_443"],
     "http":         ["dns", "port_80"],
@@ -35,6 +36,7 @@ class DiagnosticPayload:
     target: str
     resolved_ip: Optional[str]
     intent: str
+    intended_modules: List[str] = field(default_factory=list)
     modules_run: List[str] = field(default_factory=list)
     results: Dict[str, Any] = field(default_factory=dict)
     errors: Dict[str, str] = field(default_factory=dict)
@@ -64,21 +66,21 @@ class DiagnosticEngine:
         Run the diagnostic suite chosen by *intent*.
         Returns a DiagnosticPayload with all results.
         """
-        modules = INTENT_MODULE_MAP.get(intent, INTENT_MODULE_MAP["full"])
+        modules = list(INTENT_MODULE_MAP.get(intent, INTENT_MODULE_MAP["full"]))
+        if intent == "full" and "network_info" not in modules:
+            modules.append("network_info")
+
         payload = DiagnosticPayload(
             target=self.display_target,
             resolved_ip=self.target,
             intent=intent,
+            intended_modules=modules,
         )
 
         t_start = time.perf_counter()
 
         for mod_name in modules:
             self._run_module(mod_name, payload, ping_count, custom_ports)
-
-        # Always add local network info for "full" scan
-        if intent == "full" and "network_info" not in payload.modules_run:
-            self._run_module("network_info", payload, ping_count, custom_ports)
 
         payload.total_time_ms = round((time.perf_counter() - t_start) * 1000, 2)
         return payload

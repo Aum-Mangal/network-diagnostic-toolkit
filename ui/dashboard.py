@@ -243,7 +243,7 @@ def _render_diagnosis(processed: ProcessedResult) -> None:
     emoji  = processed.status_emoji
     color  = {"HEALTHY": "green", "WARNING": "yellow", "CRITICAL": "red", "UNKNOWN": "white"}.get(status, "white")
 
-    console.print(Rule(f"[bold]{emoji} DIAGNOSIS[/bold]", style=color))
+    console.print(Rule(f"[bold]{emoji} DIAGNOSIS & ROOT-CAUSE ANALYSIS[/bold]", style=color))
 
     # Health score bar
     bar_filled = int(score / 5)
@@ -252,15 +252,29 @@ def _render_diagnosis(processed: ProcessedResult) -> None:
     console.print(f"  Health Score: {bar}  [{color}]{score}/100[/{color}]  [{color}]{status}[/{color}]")
     console.print()
 
+    # Synthesized Root-Cause Verdict
+    if processed.joint_root_cause:
+        console.print(Panel(
+            f"[bold {color}]Verdict:[/bold {color}] {processed.joint_root_cause}",
+            border_style=color,
+            title="Root-Cause Analysis",
+            padding=(0, 2)
+        ))
+        console.print()
+
     # Problems
     if processed.problems:
-        console.print("  [bold]Problems Detected:[/bold]")
+        console.print("  [bold]Diagnostic Findings & Measurements:[/bold]")
         sev_color = {"critical": "red", "warning": "yellow", "info": "cyan"}
         for i, p in enumerate(processed.problems, 1):
             c = sev_color.get(p.severity, "white")
-            console.print(f"    {i}. [{c}][{p.severity.upper()}][/{c}] {p.description}")
+            console.print(f"    {i}. [{c}][{p.severity.upper()}][/{c}] [bold]{p.description}[/bold]")
+            if p.measurement and p.threshold:
+                console.print(f"       [dim]Measured: [white]{p.measurement}[/white] | Threshold: [white]{p.threshold}[/white][/dim]")
             if p.detail:
                 console.print(f"       [dim]{p.detail}[/dim]")
+            if p.explanation:
+                console.print(f"       [italic dim]{p.explanation}[/italic dim]")
         console.print()
     else:
         console.print("  [green]✓ No significant problems detected.[/green]\n")

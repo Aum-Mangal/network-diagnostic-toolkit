@@ -5,8 +5,9 @@ Entry point. Supports interactive mode, NL queries, and CLI flags.
 Usage examples
 ──────────────
   python main.py                           # interactive mode
-  python main.py google.com               # full scan (positional)
+  python main.py google.com                # full scan (positional)
   python main.py "Why is google.com slow?" # natural-language query
+  python main.py "check port 8080 on 1.1.1.1" # NL query with ports
   python main.py google.com --intent ping  # specific module
   python main.py google.com --ports 22 80 443 --save txt
   python main.py google.com --graphs
@@ -28,6 +29,7 @@ if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.prompt import Prompt
 
 console = Console(highlight=False, force_terminal=True)
@@ -99,15 +101,35 @@ def main() -> None:
             console.print("[red]No input provided. Exiting.[/red]")
             sys.exit(1)
 
-    # ── NL parsing ────────────────────────────────────────────────────────
+    # ── NL parsing & target extraction ────────────────────────────────────
     from analysis.diagnosis import parse_query
     parsed = parse_query(raw_query)
 
-    target = parsed.target or raw_query
+    target = parsed.target
     intent = args.intent or parsed.intent
+    ports = args.ports or parsed.custom_ports
 
+    # Handle missing target interactively
+    if parsed.needs_target or not target:
+        console.print(f"\n[yellow]⚠️  {parsed.clarification_prompt}[/yellow]\n")
+        target = Prompt.ask("[bold cyan]Enter destination host or IP (e.g. google.com)[/bold cyan]").strip()
+        if not target:
+            console.print("[red]No target specified. Cannot continue.[/red]")
+            sys.exit(1)
+
+    # Display interpretation breakdown
     if parsed.natural_language:
-        console.print(f"\n[dim]Interpreted: target=[cyan]{target}[/cyan]  intent=[cyan]{intent}[/cyan][/dim]\n")
+        from core.diagnostic_engine import INTENT_MODULE_MAP
+        modules = INTENT_MODULE_MAP.get(intent, ["full"])
+        interp_text = (
+            f"[bold]Query:[/bold] {raw_query}\n"
+            f"[bold]Extracted Target:[/bold] [cyan]{target}[/cyan] ({parsed.extracted_target_type})\n"
+            f"[bold]Inferred Intent:[/bold] [cyan]{intent}[/cyan]\n"
+            f"[bold]Scheduled Checks:[/bold] [dim]{', '.join(modules)}[/dim]"
+        )
+        if ports:
+            interp_text += f"\n[bold]Target Ports:[/bold] [dim]{ports}[/dim]"
+        console.print(Panel(interp_text, title="Smart Query Interpretation", border_style="cyan"))
 
     # ── Validate ──────────────────────────────────────────────────────────
     from core.validator import validate
@@ -118,17 +140,17 @@ def main() -> None:
         console.print(f"[red]✗ {validation.error}[/red]")
         sys.exit(1)
 
-    console.print(f"[green]OK Valid {validation.input_type}[/green]  ->  [cyan]{validation.resolved_ip}[/cyan]  "
+    console.print(f"[green]✓ Valid {validation.input_type}[/green] -> [cyan]{validation.resolved_ip}[/cyan] "
                   f"[dim]({validation.resolution_time_ms:.1f} ms)[/dim]\n")
 
     # ── Diagnostics ───────────────────────────────────────────────────────
     from core.diagnostic_engine import DiagnosticEngine
     engine = DiagnosticEngine(validation)
 
-    console.print(f"[dim]Running diagnostics  [intent=[cyan]{intent}[/cyan]] …[/dim]\n")
+    console.print(f"[dim]Running diagnostics suite [intent=[cyan]{intent}[/cyan]] …[/dim]\n")
     payload = engine.run(
         intent=intent,
-        custom_ports=args.ports,
+        custom_ports=ports,
         ping_count=args.count,
     )
 
@@ -151,7 +173,7 @@ def main() -> None:
         from reports.report_generator import save_report
         for fmt in args.save:
             path = save_report(processed, fmt=fmt)
-            console.print(f"[green]Report saved:[/green] {path}")
+            console.print(f"[green]✓ Report saved:[/green] {path}")
 
     console.print(f"\n[dim]Total diagnostic time: {payload.total_time_ms:.0f} ms[/dim]\n")
 

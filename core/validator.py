@@ -1,8 +1,11 @@
 """
 validator.py — Phase 2: Input Validation & Resolution
-Validates user input (IP / domain), resolves hostname to IP.
+Validates user input (IPv4 / IPv6 / domain / localhost), resolves hostname to IP.
 """
 
+from __future__ import annotations
+
+import ipaddress
 import re
 import socket
 import time
@@ -10,23 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-# ── Regex patterns ─────────────────────────────────────────────────────────
-_IPV4_RE = re.compile(
-    r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
-    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$"
-)
-_IPV6_RE = re.compile(
-    r"^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$"
-    r"|^::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}$"
-    r"|^(?:[0-9a-fA-F]{1,4}:){1,7}:$"
-    r"|^::$"
-    r"|^(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$"
-    r"|^(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}$"
-    r"|^(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}$"
-    r"|^(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}$"
-    r"|^(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}$"
-    r"|^[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}$"
-)
+# ── Domain regex pattern ───────────────────────────────────────────────────
 _DOMAIN_RE = re.compile(
     r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+"
     r"[a-zA-Z]{2,}$"
@@ -38,7 +25,7 @@ class ValidationResult:
     """Structured result returned by the validator."""
     raw_input: str
     is_valid: bool
-    input_type: str           # "ipv4" | "ipv6" | "domain" | "unknown"
+    input_type: str           # "ipv4" | "ipv6" | "domain" | "localhost" | "unknown"
     resolved_ip: Optional[str]
     hostname: Optional[str]
     error: Optional[str]
@@ -52,38 +39,54 @@ def validate(user_input: str, timeout: float = 5.0) -> ValidationResult:
     Returns a ValidationResult with full context for downstream modules.
     """
     raw = user_input.strip()
-
-    # ── Step 1: detect type ────────────────────────────────────────────────
-    if _IPV4_RE.match(raw):
-        input_type = "ipv4"
-    elif _IPV6_RE.match(raw):
-        input_type = "ipv6"
-    elif _DOMAIN_RE.match(raw):
-        input_type = "domain"
-    else:
+    if not raw:
         return ValidationResult(
-            raw_input=raw,
+            raw_input="",
             is_valid=False,
             input_type="unknown",
             resolved_ip=None,
             hostname=None,
-            error=f"'{raw}' is not a valid IP address or hostname.",
+            error="Input is empty. Please enter a valid domain or IP address.",
             resolution_time_ms=0.0,
         )
 
-    # ── Step 2: resolve ────────────────────────────────────────────────────
+    # ── Step 1: Detect IP or Domain Type ─────────────────────────────────────
+    input_type = "unknown"
+    try:
+        parsed_ip = ipaddress.ip_address(raw)
+        input_type = "ipv6" if isinstance(parsed_ip, ipaddress.IPv6Address) else "ipv4"
+    except ValueError:
+        if raw.lower() == "localhost":
+            input_type = "localhost"
+        elif _DOMAIN_RE.match(raw):
+            input_type = "domain"
+        else:
+            return ValidationResult(
+                raw_input=raw,
+                is_valid=False,
+                input_type="unknown",
+                resolved_ip=None,
+                hostname=None,
+                error=f"'{raw}' is not a valid IP address or hostname.",
+                resolution_time_ms=0.0,
+            )
+
+    # ── Step 2: Resolve Host / IP ──────────────────────────────────────────
     socket.setdefaulttimeout(timeout)
     t0 = time.perf_counter()
     try:
         if input_type in ("ipv4", "ipv6"):
-            # Already an IP — do a reverse lookup for hostname (best-effort)
             resolved_ip = raw
             try:
                 hostname = socket.gethostbyaddr(raw)[0]
             except Exception:
                 hostname = raw
-        else:
-            # Domain — forward DNS
+
+        elif input_type == "localhost":
+            resolved_ip = "127.0.0.1"
+            hostname = "localhost"
+
+        else:  # domain
             resolved_ip = socket.gethostbyname(raw)
             hostname = raw
 
@@ -118,5 +121,16 @@ def validate(user_input: str, timeout: float = 5.0) -> ValidationResult:
             resolved_ip=None,
             hostname=None,
             error=f"DNS resolution failed: {exc}",
+            resolution_time_ms=round(elapsed, 2),
+        )
+    except Exception as exc:
+        elapsed = (time.perf_counter() - t0) * 1000
+        return ValidationResult(
+            raw_input=raw,
+            is_valid=False,
+            input_type=input_type,
+            resolved_ip=None,
+            hostname=None,
+            error=f"Validation failed: {exc}",
             resolution_time_ms=round(elapsed, 2),
         )
