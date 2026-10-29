@@ -1,8 +1,11 @@
 """
-traceroute.py — Phase 5: Traceroute Module
+traceroute.py — Phase 5: High-Performance Traceroute Module
 
-Uses the OS traceroute / tracert command and parses each hop into
-structured data for visualization and analysis.
+Uses streaming OS traceroute / tracert with intelligent early-exit:
+- 800ms per-hop probe timeout (fast, responsive)
+- Early-exit as soon as destination IP is reached
+- Early-exit if 3 consecutive hops time out (border firewall dropping ICMP)
+- Strict non-blocking reverse DNS lookups
 """
 
 from __future__ import annotations
@@ -11,12 +14,13 @@ import platform
 import re
 import socket
 import subprocess
+import time
 from typing import Any, Dict, List, Optional
 
 
-def run_traceroute(target: str, max_hops: int = 30, timeout: int = 3) -> Dict[str, Any]:
+def run_traceroute(target: str, max_hops: int = 18, timeout: int = 1) -> Dict[str, Any]:
     """
-    Run a traceroute to *target* and parse the results.
+    Run an optimized, streaming traceroute to *target*.
 
     Returns:
     {
@@ -26,37 +30,72 @@ def run_traceroute(target: str, max_hops: int = 30, timeout: int = 3) -> Dict[st
         "reached":      bool,
         "error":        str | None,
     }
-
-    HopDict = {
-        "hop":        int,
-        "ip":         str | None,
-        "hostname":   str | None,
-        "latency_ms": float | None,
-        "timed_out":  bool,
-    }
     """
     system = platform.system().lower()
 
     if system == "windows":
-        cmd = ["tracert", "-d", "-h", str(max_hops), "-w", str(timeout * 1000), target]
+        # -d: no DNS resolution inside tracert (we do fast async resolution ourselves)
+        # -h: max hops
+        # -w 800: 800ms per probe timeout (down from default 4000ms!)
+        cmd = ["tracert", "-d", "-h", str(max_hops), "-w", "800", target]
     else:
-        cmd = ["traceroute", "-n", "-m", str(max_hops), "-w", str(timeout), target]
+        cmd = ["traceroute", "-n", "-m", str(max_hops), "-w", "1", target]
 
     hops: List[Dict[str, Any]] = []
     reached = False
     error: Optional[str] = None
+    consecutive_timeouts = 0
 
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=max_hops * (timeout + 2),
+            bufsize=1,
         )
-        output = proc.stdout + proc.stderr
-        hops, reached = _parse_output(output, system, target)
-    except subprocess.TimeoutExpired:
-        error = "Traceroute timed out"
+
+        t_start = time.perf_counter()
+        # Enforce max 14 seconds hard ceiling on traceroute
+        max_duration = 14.0
+
+        for line in proc.stdout:
+            # Check elapsed time ceiling
+            if time.perf_counter() - t_start > max_duration:
+                proc.terminate()
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            hop = _parse_windows_line(line) if system == "windows" else _parse_unix_line(line)
+            if not hop:
+                continue
+
+            hops.append(hop)
+
+            # Check if destination reached
+            if hop.get("ip") and (hop["ip"] == target or target in hop.get("ip", "")):
+                reached = True
+                proc.terminate()
+                break
+
+            # Check for consecutive timeouts (e.g. AWS/Amazon perimeter firewall)
+            if hop.get("timed_out"):
+                consecutive_timeouts += 1
+                if consecutive_timeouts >= 3:
+                    # Once a border firewall drops 3 hops in a row, remaining hops will also time out
+                    proc.terminate()
+                    break
+            else:
+                consecutive_timeouts = 0
+
+        try:
+            proc.wait(timeout=1.0)
+        except Exception:
+            proc.kill()
+
     except FileNotFoundError:
         error = "traceroute/tracert binary not found"
     except Exception as exc:
@@ -73,38 +112,11 @@ def run_traceroute(target: str, max_hops: int = 30, timeout: int = 3) -> Dict[st
 
 # ── Parsers ─────────────────────────────────────────────────────────────────
 
-def _parse_output(
-    output: str, system: str, target: str
-) -> tuple[List[Dict[str, Any]], bool]:
-    hops: List[Dict[str, Any]] = []
-    reached = False
-
-    lines = output.splitlines()
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        if system == "windows":
-            hop = _parse_windows_line(line)
-        else:
-            hop = _parse_unix_line(line)
-
-        if hop:
-            hops.append(hop)
-            if hop.get("ip") and hop["ip"] == target:
-                reached = True
-
-    return hops, reached
-
-
 def _parse_windows_line(line: str) -> Optional[Dict[str, Any]]:
     """
     Example: '  2    12 ms    11 ms    12 ms  192.168.1.1'
              '  3     *        *        *     Request timed out.'
     """
-    # Match hop number at start
     m = re.match(r"^\s*(\d+)\s+", line)
     if not m:
         return None
@@ -114,11 +126,9 @@ def _parse_windows_line(line: str) -> Optional[Dict[str, Any]]:
     if "timed out" in line.lower() or re.search(r"\*\s+\*\s+\*", line):
         return {"hop": hop_num, "ip": None, "hostname": None, "latency_ms": None, "timed_out": True}
 
-    # Extract all latency values (ms)
     latencies = [float(x) for x in re.findall(r"(\d+)\s*ms", line)]
     avg_lat = round(sum(latencies) / len(latencies), 2) if latencies else None
 
-    # Extract IP at end
     ip_match = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})\s*$", line)
     ip = ip_match.group(1) if ip_match else None
     hostname = _reverse_lookup(ip) if ip else None
@@ -164,8 +174,13 @@ def _parse_unix_line(line: str) -> Optional[Dict[str, Any]]:
 
 
 def _reverse_lookup(ip: str) -> Optional[str]:
-    """Attempt a reverse DNS lookup; silently return None on failure."""
+    """Attempt a fast reverse DNS lookup with a strict 0.4s timeout ceiling."""
     try:
-        return socket.gethostbyaddr(ip)[0]
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(0.4)
+        try:
+            return socket.gethostbyaddr(ip)[0]
+        finally:
+            socket.setdefaulttimeout(old_timeout)
     except Exception:
         return None

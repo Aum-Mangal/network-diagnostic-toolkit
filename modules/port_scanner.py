@@ -39,7 +39,7 @@ DEFAULT_PORTS = [22, 53, 80, 443, 8080]
 def run_port_scan(
     target: str,
     ports: List[int] = None,
-    timeout: float = 2.0,
+    timeout: float = 1.0,
     max_workers: int = 20,
 ) -> Dict[str, Any]:
     """

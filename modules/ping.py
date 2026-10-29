@@ -35,7 +35,7 @@ def tcp_syn_ping(target: str, ports: tuple[int, ...] = (443, 80), timeout: float
     return None
 
 
-def run_ping(target: str, count: int = 4, timeout: int = 3) -> Dict[str, Any]:
+def run_ping(target: str, count: int = 4, timeout: int = 1) -> Dict[str, Any]:
     """
     Ping *target* with *count* ICMP echo requests.
     If 100% packet loss is observed, automatically executes a TCP SYN handshake
